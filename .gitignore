@@ -1,8 +1,11 @@
 .DS_Store
 __pycache__
 
+tmp
 data/2_synthetic_rhoa_wave/
 data/3_podosome_tracks/
 data/4_polymerization_wave/
 data/5_hole_tracking/
 .Rproj.user
+*.Rproj
+.Rhistory

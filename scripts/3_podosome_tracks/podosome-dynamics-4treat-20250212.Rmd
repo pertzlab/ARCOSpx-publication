@@ -1,0 +1,646 @@
+---
+title: "Quantification of podosome dynamics in response to 4 treatments - dataset 20250212"
+date: "`r Sys.Date()`"
+author: MD
+output:
+  rmdformats::html_clean:
+    highlight: kate
+    code_folding: hide
+---
+
+
+```{r setup, echo=FALSE, cache=FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="10000")
+opts_chunk$set(echo=FALSE,
+               cache=FALSE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+```
+
+# Intro
+
+REF52 cells were treated with:
+
+- blebbistatin, myosin inhibitor,
+- latrunculin B, prevents actin polymerization, 
+- Y-compound (Y-27632), ROCK inhibitor.
+
+```{r, echo=TRUE}
+library(data.table, quietly = T)
+library(boot, quietly = T)
+library(effsize)
+
+library(ggplot2, quietly = T)
+library(ggpubr, quietly = T)
+library(ggthemes, quietly = T)
+library(viridis, quietly = T)
+library(ggh4x, quietly = T)
+
+
+## Custom functions ----
+
+f_med <- function(Y,i) median(Y[i])
+
+f_med_boot <- function(x, conf_level = .9, n = 10000) {
+  loc_median_boot <- boot::boot(x, R = n, statistic = f_med)
+  loc_median <- mean(loc_median_boot$t)
+  loc_SE_boot <- sd(as.vector(loc_median_boot$t))
+  
+  loc_median_int <- loc_median + qt( c(0.5*(1-conf_level), 1 - 0.5*(1-conf_level)), 
+                                     length(x) - 1) * loc_SE_boot
+  
+  return(list(mean = mean(x),
+              median = median(x),
+              median_boot = loc_median,
+              median_boot_SE = loc_SE_boot,
+              CI_low = loc_median_int[1],
+              CI_hi = loc_median_int[2]))
+}
+
+f_mean <- function(Y,i) mean(Y[i])
+
+f_mean_boot <- function(x, conf_level = .9, n = 10000) {
+  loc_mean_boot <- boot::boot(x, R = n, statistic = f_mean)
+  loc_mean <- mean(loc_mean_boot$t)
+  loc_SE_boot <- sd(as.vector(loc_mean_boot$t))
+  
+  loc_mean_int <- loc_mean + qt( c(0.5*(1-conf_level), 1 - 0.5*(1-conf_level)), 
+                                 length(x) - 1) * loc_SE_boot
+  
+  return(list(mean = mean(x),
+              median = median(x),
+              mean_boot = loc_mean,
+              mean_boot_SE = loc_SE_boot,
+              CI_low = loc_mean_int[1],
+              CI_hi = loc_mean_int[2]))
+}
+
+mySwitch <- function(x,y) {
+  if (x > 0 & y > 0)
+    res = "s>0, m>0"
+  else if (x > 0)
+    res = "s>0, m=0"
+  else if (y > 0)
+    res = "s=0, m>0"
+  else
+    res = "s=0, m=0"
+  
+  return(res)
+}
+
+myPsig <- function(x) {
+  return(symnum(x, 
+                corr = FALSE, 
+                na = FALSE, 
+                cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, Inf), 
+                symbols = c("****", "***", "**", "*", "ns")))
+}
+
+myPropTest <- function(gr, cond1, cond2) {
+  tmp <- prop.test(x = c(dtsub2_n[condition %in% cond1 & splitsN_mergesN == gr, Nsub],
+                         dtsub2_n[condition %in% cond2 & splitsN_mergesN == gr, Nsub]),
+                   n = c(dtsub2_n[condition %in% cond1 & splitsN_mergesN == gr, Ntot],
+                         dtsub2_n[condition %in% cond2 & splitsN_mergesN == gr, Ntot]),
+  )
+  
+  return(
+    list(
+      class = gr,
+      group1 = cond1,
+      group2 = cond2,
+      p = tmp$p.value
+    )
+  )
+}
+
+
+myTest <- function(x,y) {
+  
+  cd_res <- cohen.d(x,y)
+  wt_res <- wilcox.test(x,y)
+  tt_res <- t.test(x,y)
+  
+  return(
+    list(
+      cd = cd_res$estimate,
+      pv.wt = wt_res$p.value,
+      pv.tt = tt_res$p.value
+    )
+  )
+}
+
+
+## Parameters ----
+
+lPar = list()
+
+lPar$dirCore = "../../data/3_podosome_tracks"
+lPar$fIn = "input-data/lineage_stats_merged_4treat_20250212.csv.gz"
+
+
+lPar$dirPlots = 'output-plots-dynamics-4treat-20250212'  
+lPar$dirData = 'output-data-dynamics-4treat-20250212'
+
+s.tmp = file.path(lPar$dirCore, lPar$dirPlots)
+if (!dir.exists(s.tmp))
+  dir.create(s.tmp, recursive = T)
+
+s.tmp = file.path(lPar$dirCore, lPar$dirData)
+if (!dir.exists(s.tmp))
+  dir.create(s.tmp, recursive = T)
+
+rm(s.tmp)
+
+
+
+lPar$sample.period = 4 # acquisition interval in seconds
+lPar$track.minlen = 4 # minimum lineage length in frames
+
+lPar$exportPlots = T
+lPar$exportData = T
+
+lPar$cond_order = c("dmso", 
+                    "blebbistatin", 
+                    "latrunculinb", 
+                    "ycompound")
+
+my_comparisons <- list( c(lPar$cond_order[1], lPar$cond_order[2]), 
+                        c(lPar$cond_order[1], lPar$cond_order[3]), 
+                        c(lPar$cond_order[1], lPar$cond_order[4]) )
+
+lCols = list()
+
+# The palette with grey:
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+# The palette with black:
+cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+```
+
+# Overview
+
+```{r}
+dt <- fread(file.path(lPar$dirCore, lPar$fIn))
+
+dtsub <- unique(dt[,
+                   .(condition,
+                     fov,
+                     lineage_id,
+                     lineage_duration,
+                     num_splits,
+                     num_merges,
+                     ended_at_last_frame,
+                     ended_as_a_merge)])
+
+dtsub[,
+      `:=`(freq_merge_min = num_merges / lineage_duration / lPar$sample.period * 60,
+           freq_split_min = num_splits / lineage_duration / lPar$sample.period * 60,
+           splits0_merges0 = !(num_splits > 0 | num_merges > 0))]
+```
+# The effect of drugs on lineage duration
+
+## Distribution of lineage duration
+
+```{r}
+ggplot(dtsub,
+       aes(x = lineage_duration * lPar$sample.period/60,
+           y = ..density..)) + 
+  geom_histogram(binwidth = lPar$sample.period/60, boundary = 0) +
+  geom_vline(xintercept = lPar$track.minlen * lPar$sample.period/60,
+             linetype = "dashed",
+             color = "red") +
+  xlab("Duration [min]") +
+  ylab("Density") +
+  theme_few()
+```
+
+```{r results='asis'}
+cat(sprintf("Selecting lineages longer than %d frames (%.4f seconds), those that finished before the end of acquisition, and those that did not end as a merge.\n\n", lPar$track.minlen, lPar$track.minlen * lPar$sample.period))
+```
+
+```{r}
+dtsub2 <- dtsub[lineage_duration > lPar$track.minlen & ended_at_last_frame == FALSE & ended_as_a_merge == FALSE]
+dtsub2[, condition := factor(condition, levels = lPar$cond_order)]
+```
+
+## Filtered lineages
+
+```{r}
+cd_res <- rep(0,3)
+nn = 1
+
+for (ii in seq_along(my_comparisons)) {
+  v1 <- dtsub2[condition %in% my_comparisons[[ii]][2], lineage_duration]
+  v2 <- dtsub2[condition %in% my_comparisons[[ii]][1], lineage_duration]
+  tmp <- cohen.d(v1,v2)
+  cd_res[nn] <- tmp$estimate
+  nn = nn + 1
+}
+
+dt_cd_res <- data.table(condition = lPar$cond_order[1:3],
+                        lineage_duration = c(275, 305, 335),
+                        cd_est = sprintf("d=%.2f", cd_res))
+```
+
+
+```{r fig.width=8, fig.height=4}
+ggplot(dtsub2,
+       aes(x = condition,
+           y = lineage_duration * lPar$sample.period / 60)) +
+  geom_violin(aes(fill = condition), 
+              width = .4) +
+  #scale_fill_brewer(palette = "Set2") +
+  scale_fill_manual(values = cbPalette) +
+  geom_boxplot(fill = NA, outlier.shape = NA, notch = T, width = .4) +
+  stat_compare_means(comparisons = my_comparisons,
+                     label = "p.signif", label.y = c(20, 22, 24)) +
+  xlab('') +
+  ylab("Lineage duration [min]") +
+  geom_text(aes(label=cd_est),
+            data=dt_cd_res, nudge_x = .5) +
+  theme_few() +
+  theme(legend.position = 'none')
+```
+
+```{r}
+dtsub2_n <- dtsub2[,
+                   .N,
+                   by = condition]
+
+print(dtsub2_n)
+```
+
+## Stratified: with and without split/merge events
+
+```{r}
+# Add a column with split/merge group
+
+dtsub2[,
+       splitsN_mergesN := mySwitch(num_splits, num_merges),
+       by=.I]
+
+dtsub2[,
+       splits0_merges0 := factor(splits0_merges0, 
+                                 levels = c(TRUE, FALSE))]
+```
+
+```{r}
+cd_res <- list()
+nn = 1
+for (kk in c(FALSE, TRUE)) 
+  for (ii in seq_along(my_comparisons)) {
+    v1 <- dtsub2[splits0_merges0 == kk & condition %in% my_comparisons[[ii]][2], lineage_duration]
+    v2 <- dtsub2[splits0_merges0 == kk & condition %in% my_comparisons[[ii]][1], lineage_duration]
+    
+    cd_res[[nn]] <- myTest(v1, v2)
+    
+    cd_res[[nn]]$splits0_merges0 <- kk
+    cd_res[[nn]]$group1 <- my_comparisons[[ii]][1]
+    cd_res[[nn]]$group2 <- my_comparisons[[ii]][2]
+    
+    nn = nn + 1
+  }
+
+dt_cd_res = rbindlist(cd_res)
+
+setorder(dt_cd_res,
+         splits0_merges0)
+
+dt_cd_res[,
+          `:=`(pv.wt.sig = myPsig(pv.wt),
+               pv.tt.sig = myPsig(pv.tt),
+               y.position = rep(c(18,20,22), 2))]
+
+dt_cd_res[,
+          pv.wt.cd := sprintf("%s, d=%.2f", pv.wt.sig, cd)]
+```
+
+
+```{r fig.width=8, fig.height=4}
+p <- ggplot(dtsub2,
+            aes(x = condition,
+                y = lineage_duration * lPar$sample.period / 60)) +
+  geom_violin(aes(fill = condition), 
+              width = .4) +
+  #scale_fill_brewer(palette = "Set2") +
+  scale_fill_manual(values = cbPalette) +
+  geom_boxplot(fill = NA, outlier.shape = NA, notch = T, width = .4) +
+  ggpubr::stat_pvalue_manual(data = dt_cd_res,
+                             label = "pv.wt.cd") +
+  facet_wrap(~splits0_merges0) + 
+  xlab('') +
+  ylab("Lineage duration [min]") +
+  # geom_text(aes(label=cd_est),
+  #           data=dt_cd_res, nudge_x = .5) +
+  theme_few() +
+  theme(legend.position = 'none')
+
+if (lPar$exportPlots)
+  ggsave(filename = file.path(lPar$dirCore,
+                              lPar$dirPlots,
+                              "lineage-duration_violin-box.pdf"),
+         plot = p,
+         width = 8, height = 4)
+
+p
+```
+
+```{r}
+dtsub2[,
+       .(.N,
+         med_lineage_duration = median(lineage_duration)*lPar$sample.period/60),
+       by = .(condition,
+              splits0_merges0)]
+```
+
+
+
+
+```{r, fig.height=4, fig.width=7}
+p <- ggplot(dtsub2,
+            aes(lineage_duration * lPar$sample.period / 60,
+                after_stat(density))) +
+  geom_freqpoly(aes(color = condition), 
+                binwidth = 1,
+                boundary = 0, 
+                pad = FALSE) +
+  scale_color_manual(name = "",
+                     values = cbPalette) +
+  facet_wrap(~splits0_merges0) + 
+  coord_cartesian(xlim = c(0,15)) +
+  ylab('Density') +
+  xlab("Lineage duration [min]") +
+  theme_few() +
+  theme(legend.position = 'right')
+
+if (lPar$exportPlots)
+  ggsave(filename = file.path(lPar$dirCore,
+                              lPar$dirPlots,
+                              "lineage-duration_freqpoly.pdf"),
+         plot = p,
+         width = 7, height = 4)
+
+p
+```
+
+
+```{r}
+dtsub2_n <- merge(dtsub2[,
+                         .(Nsub = .N),
+                         by = .(condition,
+                                splitsN_mergesN)],
+                  dtsub2[,
+                         .(Ntot = .N),
+                         by = .(condition)])
+
+dtsub2_n[,
+         smPerc := Nsub / Ntot * 100]
+
+print(dtsub2_n)
+```
+
+
+```{r, fig.height=4, fig.width=6}
+p <- ggplot(dtsub2_n,
+            aes(x = condition,
+                y = Nsub,
+                fill = splitsN_mergesN)) +
+  geom_bar(position="fill", stat="identity") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_tableau(name = "",
+                     palette = "Tableau 10") +
+  xlab("") +
+  ylab("Percentage of lineages") +
+  theme_few()
+
+if (lPar$exportPlots)
+  ggsave(filename = file.path(lPar$dirCore,
+                              lPar$dirPlots,
+                              "lineage-percentage_bar.pdf"),
+         plot = p,
+         width = 6, height = 4)
+
+p
+```
+
+```{r}
+pv_res <- list()
+nn = 1
+for (kk in unique(dtsub2_n[,splitsN_mergesN])) {
+  for (ii in seq_along(my_comparisons)) {
+    
+    cond1 <- my_comparisons[[ii]][1]
+    cond2 <- my_comparisons[[ii]][2]
+    
+    # cat(sprintf("Group %s: compare %s with %s\n", kk, cond1, cond2))
+    pv_res[[nn]] <- myPropTest(kk, cond1, cond2)
+    
+    nn = nn + 1
+  }
+  #cat("\n")
+}
+
+dt_pv_res = rbindlist(pv_res)
+
+setorder(dt_pv_res,
+         class)
+dt_pv_res[,
+          `:=`(p.signif = myPsig(p),
+               y.position = 5 + seq(0,11,1),
+               splits0_merges0 = ifelse(class == "s=0, m=0", TRUE, FALSE))]
+
+dt_pv_res[class == "s=0, m=0",
+          y.position := 90 + seq(0,10,5)]
+
+dtsub2_n[, 
+         splits0_merges0 := ifelse(splitsN_mergesN == "s=0, m=0", TRUE, FALSE)]
+```
+
+
+```{r, fig.width=6, fig.height=7}
+p <- ggplot(dtsub2_n,
+            aes(x = condition,
+                y = smPerc,
+                group = splitsN_mergesN,
+                color = splitsN_mergesN)) +
+  geom_line() +
+  geom_point() +
+  geom_point(data = data.table(condition = "dmso",
+                               splitsN_mergesN = "s>0, m>0",
+                               splits0_merges0 = FALSE,
+                               smPerc = 0),
+             color = "white") +
+  ggpubr::stat_pvalue_manual(data = dt_pv_res[class == "s=0, m=0"],
+                             label = "p.signif",
+                             color = ggthemes::tableau_color_pal(palette = "Tableau 10")(10)[1]) +
+  ggpubr::stat_pvalue_manual(data = dt_pv_res[class == "s=0, m>0"],
+                             label = "p.signif",
+                             color = ggthemes::tableau_color_pal(palette = "Tableau 10")(10)[2]) +
+  ggpubr::stat_pvalue_manual(data = dt_pv_res[class == "s>0, m=0"],
+                             label = "p.signif",
+                             color = ggthemes::tableau_color_pal(palette = "Tableau 10")(10)[3]) +
+  ggpubr::stat_pvalue_manual(data = dt_pv_res[class == "s>0, m>0"],
+                             label = "p.signif",
+                             color = ggthemes::tableau_color_pal(palette = "Tableau 10")(10)[4]) +
+  scale_color_manual(name = "",
+                     values = ggthemes::tableau_color_pal(palette = "Tableau 10")(10)[1:4]) +
+  facet_grid(splits0_merges0 ~ ., scales = "free_y") +
+  xlab("") +
+  ylab("Percentage of lineages") +
+  theme_few() + 
+  ggh4x::facetted_pos_scales(y = list(
+    splits0_merges0 == TRUE ~ scale_y_continuous(limits = c(0, 100)),
+    splits0_merges0 == FALSE ~ scale_y_continuous(limits = c(0, 15))))
+    
+    if (lPar$exportPlots)
+      ggsave(filename = file.path(lPar$dirCore,
+                                  lPar$dirPlots,
+                                  "lineage-percentage_line.pdf"),
+             plot = p,
+             width = 6, height = 7)
+    
+    p
+```
+
+# The effect of drugs on split/merge rates
+
+```{r results='asis'}
+cat(sprintf("Selecting lineages longer than %d frames (%.4f seconds) and those that had at least 1 merge or split.\n\n", lPar$track.minlen, lPar$track.minlen*lPar$sample.period/60))
+```
+
+```{r}
+dtsub3 <- dtsub[lineage_duration > lPar$track.minlen & 
+                  splits0_merges0 == FALSE]
+dtsub3[, condition := factor(condition, levels = lPar$cond_order)]
+
+dtsub3[,
+       .N,
+       by = condition]
+```
+
+
+```{r}
+dtsub3_merge_aggr <- dtsub3[,
+                            f_med_boot(freq_merge_min, conf_level = 0.95, n = 10000),
+                            by = condition]
+setnames(dtsub3_merge_aggr, 
+         setdiff(names(dtsub3_merge_aggr), c("condition", "splits0_merges0")),
+         paste0("merge_", setdiff(names(dtsub3_merge_aggr), c("condition", "splits0_merges0"))))
+
+dtsub3_split_aggr <- dtsub3[,
+                            f_med_boot(freq_split_min, conf_level = 0.95, n = 10000),
+                            by = condition]
+
+setnames(dtsub3_split_aggr, 
+         setdiff(names(dtsub3_split_aggr), c("condition", "splits0_merges0")),
+         paste0("split_", setdiff(names(dtsub3_split_aggr), c("condition", "splits0_merges0"))))
+
+
+dtsub3_aggr = merge(dtsub3_merge_aggr,
+                    dtsub3_split_aggr)
+
+```
+
+
+```{r}
+print(dtsub3_aggr)
+```
+
+
+```{r, fig.height=4, fig.width=6}
+p <- ggplot(dtsub3_aggr,
+            aes(x = split_median,
+                y = merge_median)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +
+  geom_errorbarh(aes(xmin = split_CI_low, xmax = split_CI_hi)) +
+  geom_errorbar(aes(ymin = merge_CI_low, ymax = merge_CI_hi)) +
+  geom_point(aes(color = condition),
+             size = 4) +
+  #ggthemes::scale_color_tableau(name = "Treatment") +
+  #scale_color_brewer(palette = "Set2") +
+  scale_color_manual("Treatment",
+                     values = cbPalette) +
+  xlim(.24, .38) +
+  ylim(.24, .38) +
+  coord_fixed() +
+  xlab("Median split rate per minute") +
+  ylab("Median merge rate per minute") +
+  theme_few()
+
+if (lPar$exportPlots)
+  ggsave(filename = file.path(lPar$dirCore,
+                              lPar$dirPlots,
+                              "split_vs_merge_freq_scatter.pdf"),
+         plot = p,
+         width = 5, height = 4)
+
+p
+```
+
+
+```{r}
+set.seed(5)
+dtsub3_sample <- dtsub3[,
+                        .SD[sample(.N, min(.N, 2500))],
+                        by = .(condition)]
+
+```
+
+
+```{r, fig.width=8, fig.height=8}
+ggplot(dtsub3_sample,
+       aes(x = freq_merge_min,
+           y = freq_split_min)) +
+  geom_hex(bins = c(20,20)) +
+  viridis::scale_fill_viridis(discrete = F,
+                              trans = "log10") +
+  geom_point(data = dtsub3_aggr,
+             aes(x = merge_mean,
+                 y = split_mean),
+             color = "red",
+             size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  xlim(0,3) +
+  ylim(0,3) +
+  coord_fixed() +
+  facet_wrap(~condition) +
+  xlab("Merge rate per minute") +
+  ylab("Split rate per minute") +
+  theme_few()
+```
+
+```{r, fig.width=6, fig.height=5}
+ggplot(dtsub3,
+       aes(x = freq_merge_min,
+           y = freq_split_min)) +
+  stat_density_2d(geom = "polygon",
+                  aes(alpha = ..level.., 
+                      fill = condition)) +
+  #ggthemes::scale_fill_tableau(name = "Treatment") +
+  scale_fill_manual("Treatment",
+                    values = cbPalette) +
+  geom_vline(xintercept = dtsub3_aggr[condition == "Control", merge_mean], linetype = "dashed", color = "grey50") +
+  geom_hline(yintercept = dtsub3_aggr[condition == "Control", split_mean], linetype = "dashed", color = "grey50") +
+  geom_point(data = dtsub3_aggr,
+             aes(x = merge_mean,
+                 y = split_mean),
+             size = 2) +
+  coord_fixed() +
+  #coord_cartesian(xlim = c(0,1.7), ylim = c(0,1.7)) +
+  # xlim(c(0,1.7)) +
+  # ylim(c(0,1.7)) +
+  facet_wrap(~condition) +
+  xlab("Merge rate per minute") +
+  ylab("Split rate per minute") +
+  theme_few()
+```
+
+

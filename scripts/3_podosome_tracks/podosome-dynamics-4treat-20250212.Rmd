@@ -143,17 +143,12 @@ myTest <- function(x,y) {
 lPar = list()
 
 lPar$dirCore = "../../data/3_podosome_tracks"
-lPar$fIn = "input-data/lineage_stats_merged_4treat_20250212.csv.gz"
+lPar$fIn = "input-data/lineage_4treat_20250212/lineage_stats_merged_4treat_20250212.csv.gz"
 
 
 lPar$dirPlots = 'output-plots-dynamics-4treat-20250212'  
-lPar$dirData = 'output-data-dynamics-4treat-20250212'
 
 s.tmp = file.path(lPar$dirCore, lPar$dirPlots)
-if (!dir.exists(s.tmp))
-  dir.create(s.tmp, recursive = T)
-
-s.tmp = file.path(lPar$dirCore, lPar$dirData)
 if (!dir.exists(s.tmp))
   dir.create(s.tmp, recursive = T)
 

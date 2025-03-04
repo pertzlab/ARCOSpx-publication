@@ -25,7 +25,7 @@ The following simulation functions are defined in `cellular_automaton.py`:
 To run a simulation and track the results using ARCOS.px, use the `simulation_tracking.py` script. You can specify the simulation function index and the signal-to-noise ratio as command-line arguments. For example, to run a circular wave simulation with infinite signal-to-noise ratio, use the following command:
 
 ```
-python simulation_tracking.py --sim_function_index 0 --signal_to_noise_ratio np.inf
+python simulation_tracking.py --sim_function_index 0 --signal_to_noise_ratio inf
 ```
 
 where `sim_function_index` is the index of the simulation function to use (0 for circular waves, 1 for directional waves, 2 for target patterns, 3 for chaotic patterns), and `signal_to_noise_ratio` defines the amount of added noise to the simulation.

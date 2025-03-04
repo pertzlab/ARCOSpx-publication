@@ -1,6 +1,6 @@
 # Introduction
 
-This repository contains scripts required to reproduce the results in the publication of Grädel et al. _Deciphering Subcellular Organisation Through Spatio-Temporal Correlation Tracking_ ([link](https://www.biorxiv.org)).
+This repository contains scripts required to reproduce the results in the publication of Grädel et al. _Deciphering Subcellular Organisation Through Tracking of Emergent Dynamic Events_ ([link](https://www.biorxiv.org)).
 
 
 <p align="center">

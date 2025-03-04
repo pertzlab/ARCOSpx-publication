@@ -1,6 +1,6 @@
 # Wave Simulation
 
-This folder contains Python scripts to simulate various wave patterns using a cellular automaton model. The simulations include circular waves, directional waves, target patterns, and chaotic patterns. The results of these simulations can be used to analyze wave propagation and tracking.
+This folder contains Python scripts to simulate various wave patterns using a cellular automaton model. The simulations include circular waves, directional waves, target patterns, and chaotic patterns. The results of these simulations can be tracked with ARCOS.px and subsequently evaluated using py-motmetrics.
 
 ## Contents
 

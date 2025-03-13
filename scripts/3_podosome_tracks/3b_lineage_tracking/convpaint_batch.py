@@ -4,21 +4,25 @@ from tifffile import imread, imsave
 from napari_convpaint import conv_paint_utils, conv_paint, conv_paint_param
 from catboost import CatBoostClassifier
 
+CONDITIONS = ["blebbistatin", "latrunculinb", "dmso", "ycompound"]
+CONVPAINT_MODEL_PATH = "convpaint_model"
+SEGMENTATION_PATH = "seg"
+
 
 def main():
     # Gather tif files from all folders in the current directory
     all_lifeact = []
-    for folder in ["blebbistatin", "latrunculinb", "dmso", "ycompound"]:
+    for folder in CONDITIONS:
         if os.path.isdir(folder):
             for file in os.listdir(folder):
-                if file.endswith(".tif"):
+                if file.endswith(".tif") or file.endswith(".tiff"):
                     all_lifeact.append(os.path.join(folder, file))
 
     # Determine which file to process
-    image_index = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0))
+    image_index = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0))  # this assumes you are using a SLURM cluster
     input_filename = all_lifeact[image_index]
     current_condition = input_filename.split("/")[0]
-    output_filename = os.path.join("seg", current_condition, os.path.basename(input_filename))
+    output_filename = os.path.join(SEGMENTATION_PATH, current_condition, os.path.basename(input_filename))
 
     # Read the image
     lifeact = imread(input_filename)
@@ -56,7 +60,7 @@ def main():
     # Load the CatBoost model
     print("Loading CatBoost model...")
     model = CatBoostClassifier()
-    model.load_model("convpaint_model")
+    model.load_model(CONVPAINT_MODEL_PATH)
 
     # Process the image (slice by slice if 3D)
     if lifeact.ndim == 3:

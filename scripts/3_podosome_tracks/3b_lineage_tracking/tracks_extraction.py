@@ -18,7 +18,7 @@ BiExpFuncType = Callable[[np.ndarray, float, float, float, float], np.ndarray]
 FuncType = Union[ExpFuncType, BiExpFuncType]
 
 # Define paths and directories
-IMAGE_INDEX = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0))
+IMAGE_INDEX = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0))  # this assumes you are using a SLURM cluster
 CONDITIONS = ["dmso", "blebbistatin", "latrunculinb", "ycompound"]
 RAW_DIRECTORY = "raw"
 SEGMENTATION_DIRECTORY = "seg"
@@ -107,8 +107,8 @@ def main():
         seg_condition_dir = os.path.join(SEGMENTATION_DIRECTORY, condition)
 
         # List all .tif files in raw and segmentation directories
-        raw_files = [f for f in os.listdir(raw_condition_dir) if f.endswith(".tif")]
-        seg_files = [f for f in os.listdir(seg_condition_dir) if f.endswith(".tif")]
+        raw_files = [f for f in os.listdir(raw_condition_dir) if f.endswith(".tif") or f.endswith(".tiff")]
+        seg_files = [f for f in os.listdir(seg_condition_dir) if f.endswith(".tif") or f.endswith(".tiff")]
 
         # Create a mapping for segmentation files based on filename
         seg_files_map = {f: os.path.join(seg_condition_dir, f) for f in seg_files}
@@ -240,7 +240,7 @@ def main():
 
     # merge  lineages_df with all_dfs
     all_dfs = all_dfs.merge(lineages_df, on=["lineage_id", "condition"], how="left")
-    all_dfs["real_time"] = all_dfs["frame"] * 4
+    all_dfs["real_time"] = all_dfs["frame"] * 4  # 4 seconds per frame
     all_dfs["area_microns"] = all_dfs["area"] * 0.12222222222222222  # um per pixel
     all_dfs["unique_lineage"] = (
         all_dfs["condition"] + "_" + all_dfs["fov"].astype(str) + "_" + all_dfs["lineage_id"].astype(str)

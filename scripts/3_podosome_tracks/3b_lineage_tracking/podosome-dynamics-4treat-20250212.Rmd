@@ -121,7 +121,10 @@ myPropTest <- function(gr, cond1, cond2) {
   )
 }
 
-
+# Calculate:
+# - Cohen's effect size d
+# - two-sample wilcoxon test
+# - two-sample t.test
 myTest <- function(x,y) {
   
   cd_res <- cohen.d(x,y)
@@ -142,7 +145,7 @@ myTest <- function(x,y) {
 
 lPar = list()
 
-lPar$dirCore = "../../data/3_podosome_tracks"
+lPar$dirCore = "../../../data/3_podosome_tracks"
 lPar$fIn = "input-data/lineage_4treat_20250212/lineage_stats_merged_4treat_20250212.csv.gz"
 
 
@@ -287,35 +290,54 @@ dtsub2[,
                                  levels = c(TRUE, FALSE))]
 ```
 
+
+### Lineage duration
+
 ```{r}
-cd_res <- list()
+# Calculate Cohen's effect size d and a two-sample Wilcoxon test
+stat_res <- list()
 nn = 1
 for (kk in c(FALSE, TRUE)) 
   for (ii in seq_along(my_comparisons)) {
     v1 <- dtsub2[splits0_merges0 == kk & condition %in% my_comparisons[[ii]][2], lineage_duration]
     v2 <- dtsub2[splits0_merges0 == kk & condition %in% my_comparisons[[ii]][1], lineage_duration]
     
-    cd_res[[nn]] <- myTest(v1, v2)
+    cd_res <- cohen.d(v1,v2)
+    wt_res <- wilcox.test(v1,v2)
+    tt_res <- t.test(v1,v2)
     
-    cd_res[[nn]]$splits0_merges0 <- kk
-    cd_res[[nn]]$group1 <- my_comparisons[[ii]][1]
-    cd_res[[nn]]$group2 <- my_comparisons[[ii]][2]
+    stat_res[[nn]] <- list(group1 = my_comparisons[[ii]][2],
+                           gr1_med_dur_min = median(v1) * lPar$sample.period / 60,
+                           group2 = my_comparisons[[ii]][1],
+                           gr2_med_dur_min = median(v2) * lPar$sample.period / 60,
+                           splits0_merges0 = kk,
+                           cd = cd_res$estimate,
+                           pv.wt = wt_res$p.value,
+                           pv.tt = tt_res$p.value)
     
     nn = nn + 1
   }
 
-dt_cd_res = rbindlist(cd_res)
+dt_stat_res = rbindlist(stat_res)
 
-setorder(dt_cd_res,
+setorder(dt_stat_res,
          splits0_merges0)
 
-dt_cd_res[,
-          `:=`(pv.wt.sig = myPsig(pv.wt),
-               pv.tt.sig = myPsig(pv.tt),
-               y.position = rep(c(18,20,22), 2))]
+dt_stat_res[,
+            `:=`(pv.wt.sig = myPsig(pv.wt),
+                 pv.tt.sig = myPsig(pv.tt),
+                 y.position = rep(c(18,20,22), 2))]
 
-dt_cd_res[,
-          pv.wt.cd := sprintf("%s, d=%.2f", pv.wt.sig, cd)]
+dt_stat_res[,
+            pv.wt.cd := sprintf("%s, d=%.2f", pv.wt.sig, cd)]
+
+print(dt_stat_res[,
+                  .(group1,
+                    gr1_med_dur_min,
+                    group2,
+                    gr2_med_dur_min,
+                    splits0_merges0,
+                    pv.wt.cd)])
 ```
 
 
@@ -325,10 +347,9 @@ p <- ggplot(dtsub2,
                 y = lineage_duration * lPar$sample.period / 60)) +
   geom_violin(aes(fill = condition), 
               width = .4) +
-  #scale_fill_brewer(palette = "Set2") +
   scale_fill_manual(values = cbPalette) +
   geom_boxplot(fill = NA, outlier.shape = NA, notch = T, width = .4) +
-  ggpubr::stat_pvalue_manual(data = dt_cd_res,
+  ggpubr::stat_pvalue_manual(data = dt_stat_res,
                              label = "pv.wt.cd") +
   facet_wrap(~splits0_merges0) + 
   xlab('') +
@@ -494,15 +515,15 @@ p <- ggplot(dtsub2_n,
   ggh4x::facetted_pos_scales(y = list(
     splits0_merges0 == TRUE ~ scale_y_continuous(limits = c(0, 100)),
     splits0_merges0 == FALSE ~ scale_y_continuous(limits = c(0, 15))))
-    
-    if (lPar$exportPlots)
-      ggsave(filename = file.path(lPar$dirCore,
-                                  lPar$dirPlots,
-                                  "lineage-percentage_line.pdf"),
-             plot = p,
-             width = 6, height = 7)
-    
-    p
+
+if (lPar$exportPlots)
+  ggsave(filename = file.path(lPar$dirCore,
+                              lPar$dirPlots,
+                              "lineage-percentage_line.pdf"),
+         plot = p,
+         width = 6, height = 7)
+
+p
 ```
 
 # The effect of drugs on split/merge rates

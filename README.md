@@ -60,5 +60,5 @@ Python script to process images of MCF10A WT epithelial monolayer treated with i
 # Data
 
 The `data` folder is a placeholder for files stored on the BioImage Archive due to GitHub's size restrictions. 
-Use [this link](https://www.ebi.ac.uk/bioimage-archive/) to download and unpack the data into that folder.
+Use [this link](https://doi.org/10.6019/S-BIAD1683) to download and unpack the data into that folder.
 Once in place, the scripts can process the data and reproduce the figures.

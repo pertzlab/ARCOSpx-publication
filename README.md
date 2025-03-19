@@ -1,6 +1,6 @@
 # Introduction
 
-This repository contains scripts required to reproduce the results in the publication of Grädel et al. _Deciphering Subcellular Organisation Through Tracking of Emergent Dynamic Events_ ([link](https://www.biorxiv.org)).
+This repository contains scripts required to reproduce the results in the publication of Grädel et al. _Tracking Coordinated Cellular Dynamics in Time-Lapse Microscopy with ARCOS.px_ ([link](https://doi.org/10.1101/2025.03.14.643386)).
 
 
 <p align="center">

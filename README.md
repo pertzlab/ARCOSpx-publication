@@ -32,7 +32,7 @@ Python scripts to simulate merges and splits.
 
 The scripts reproduce Figure S4A,B and Movie S6.
 
-![waves-sim](misc/waves-sim-mergesplit.png)
+![waves-sim-mergesplit](misc/waves-sim-mergesplit.png)
 
 ## [Synthetic RhoA activity wave](scripts/2_synthetic_rhoa_wave)
 
@@ -41,7 +41,7 @@ Cells express a RhoA activity sensor 2xrGBD and the optogenetic actuator optoLAR
 
 The script reproduces Figure 1B,C and Movie S7.
 
-![waves-sim](misc/waves-synth.png)
+![waves-synth](misc/waves-synth.png)
 
 
 ## [Podosome tracking](scripts/3_podosome_tracks)
@@ -62,7 +62,7 @@ Python script to track active wave-like dynamics in REF52 cells; reproduces Figu
 
 Python script to process images of MCF10A WT epithelial monolayer treated with increasing dosages of Doxorubicin; reproduces Figure 4 and Movie S11.
 
-![wave-dynamics](misc/monolayer-holes.png)
+![monolayer](misc/monolayer-holes.png)
 
 ## [Demo of seed clusters](scripts/6_others)
 

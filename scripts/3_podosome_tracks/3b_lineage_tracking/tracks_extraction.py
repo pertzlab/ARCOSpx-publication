@@ -20,9 +20,13 @@ FuncType = Union[ExpFuncType, BiExpFuncType]
 # Define paths and directories
 IMAGE_INDEX = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0))  # this assumes you are using a SLURM cluster
 CONDITIONS = ["dmso", "blebbistatin", "latrunculinb", "ycompound"]
-RAW_DIRECTORY = "raw"
-SEGMENTATION_DIRECTORY = "seg"
-OUTPUT_DIRECTORY = "results_stability_5"
+CORE_DIRECTORY = "../../../data/3_podosome_tracks/input-data/lineage_4treat_all_rawdata/"
+RAW_DIRECTORY = os.path.join(CORE_DIRECTORY, "raw")
+SEGMENTATION_DIRECTORY = os.path.join(CORE_DIRECTORY, "seg")
+
+STABILITY_THRESHOLD = 15
+
+OUTPUT_DIRECTORY = os.path.join(CORE_DIRECTORY.replace("input_data", "output_data"), f"results_stability_{STABILITY_THRESHOLD}")
 
 # prepare output directories
 output_tracks_dir = os.path.join(OUTPUT_DIRECTORY, "tracks")
@@ -99,25 +103,41 @@ def main():
     os.makedirs(output_masks_dir, exist_ok=True)
     os.makedirs(output_bleach_dir, exist_ok=True)
     os.makedirs(output_lineage_dir, exist_ok=True)
+    
+    print(IMAGE_INDEX, CONDITIONS)
 
     # Create a dictionary mapping raw files to segmentation files
     files_dict = {}
     for condition in CONDITIONS:
         raw_condition_dir = os.path.join(RAW_DIRECTORY, condition)
         seg_condition_dir = os.path.join(SEGMENTATION_DIRECTORY, condition)
+        
+        print(f"Processing condition: {condition}")
+        print(f"Raw directory: {raw_condition_dir}")
+        print(f"Segmentation directory: {seg_condition_dir}")
 
         # List all .tif files in raw and segmentation directories
         raw_files = [f for f in os.listdir(raw_condition_dir) if f.endswith(".tif") or f.endswith(".tiff")]
         seg_files = [f for f in os.listdir(seg_condition_dir) if f.endswith(".tif") or f.endswith(".tiff")]
 
+        print(f"Found {len(raw_files)} raw files and {len(seg_files)} segmentation files.")
+        print(f"Raw files: {raw_files}")
+        print(f"Segmentation files: {seg_files}")
+        
         # Create a mapping for segmentation files based on filename
         seg_files_map = {f: os.path.join(seg_condition_dir, f) for f in seg_files}
-
+        print(seg_files_map)
+        
         for raw_file in raw_files:
             raw_file_path = os.path.join(raw_condition_dir, raw_file)
 
             # Find the corresponding segmentation file
+            print(f"Looking for segmentation file for {raw_file_path}")
+            
             seg_file_path = seg_files_map.get(raw_file)
+            
+            print(f"Matched segmentation file: {seg_file_path}")
+            
             if seg_file_path:
                 files_dict[raw_file_path] = (condition, seg_file_path)
             else:
@@ -238,7 +258,7 @@ def main():
     all_dfs = lineage._add_parents_and_lineage_to_df(all_dfs, "label")
     all_dfs = all_dfs.rename(columns={"lineage": "lineage_id"})
 
-    # merge  lineages_df with all_dfs
+    # merge lineages_df with all_dfs
     all_dfs = all_dfs.merge(lineages_df, on=["lineage_id", "condition"], how="left")
     all_dfs["real_time"] = all_dfs["frame"] * 4  # 4 seconds per frame
     all_dfs["area_microns"] = all_dfs["area"] * 0.12222222222222222  # um per pixel

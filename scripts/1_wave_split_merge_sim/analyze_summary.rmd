@@ -1,0 +1,140 @@
+---
+title: "Metrics for tracking of split/merge simulations"
+date: "`r Sys.Date()`"
+author: MD
+output:
+  rmdformats::html_clean:
+    highlight: kate
+    code_folding: hide
+---
+
+
+```{r setup, echo=FALSE, cache=FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="10000")
+opts_chunk$set(echo=FALSE,
+               cache=FALSE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+```
+
+# Intro
+
+```{r, echo=TRUE}
+library(data.table, quietly = T)
+library(boot, quietly = T)
+library(effsize)
+
+library(ggplot2, quietly = T)
+library(ggpubr, quietly = T)
+library(ggthemes, quietly = T)
+library(viridis, quietly = T)
+library(ggh4x, quietly = T)
+library(ggbeeswarm, quietly = T)
+```
+
+```{r}
+lPar = list()
+
+lPar$dirCore = "../../data/1_wave_split_merge_sim"
+lPar$fIn = "output-data/tracking_evaluation_summary.csv"
+
+
+lPar$dirPlots = 'output-plots'  
+
+s.tmp = file.path(lPar$dirCore, lPar$dirPlots)
+if (!dir.exists(s.tmp))
+  dir.create(s.tmp, recursive = T)
+
+rm(s.tmp)
+
+# The palette with grey:
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+# The palette with black:
+cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+```
+
+
+```{r}
+dt <- fread(file.path(lPar$dirCore, lPar$fIn))
+```
+
+```{r}
+ggplot(dt,
+       aes(x = as.factor(stability_threshold),
+           y = MOTA)) +
+  geom_quasirandom(aes(color = as.factor(stability_threshold))) +
+  scale_color_manual("Stability\nthreshold", values = cbPalette) +
+  geom_boxplot(outlier.shape = NA, fill = NA) +
+  xlab("Stability threshold [frames]") +
+  theme_few()
+```
+
+```{r}
+ggplot(dt,
+       aes(x = as.factor(stability_threshold),
+           y = MOTP)) +
+  geom_quasirandom(aes(color = as.factor(stability_threshold))) +
+  scale_color_manual("Stability\nthreshold", values = cbPalette) +
+  geom_boxplot(outlier.shape = NA, fill = NA) +
+  xlab("Stability threshold [frames]") +
+  theme_few()
+```
+
+```{r}
+ggplot(dt,
+       aes(x = as.factor(stability_threshold),
+           y = overall_precision)) +
+  geom_quasirandom(aes(color = as.factor(stability_threshold))) +
+  scale_color_manual("Stability\nthreshold", values = cbPalette) +
+  geom_boxplot(outlier.shape = NA, fill = NA) +
+  xlab("Stability threshold [frames]") +
+  ylab("Overall precision") +
+  theme_few()
+```
+
+```{r}
+ggplot(dt,
+       aes(x = as.factor(stability_threshold),
+           y = overall_recall)) +
+  geom_quasirandom(aes(color = as.factor(stability_threshold))) +
+  scale_color_manual("Stability\nthreshold", values = cbPalette) +
+  geom_boxplot(outlier.shape = NA, fill = NA) +
+  xlab("Stability threshold [frames]") +
+  ylab("Overall recall") +
+  theme_few()
+```
+
+```{r}
+ggplot(dt,
+       aes(x = as.factor(stability_threshold),
+           y = overall_f1_score)) +
+  geom_quasirandom(aes(color = as.factor(stability_threshold))) +
+  scale_color_manual("Stability\nthreshold", values = cbPalette) +
+  geom_boxplot(outlier.shape = NA, fill = NA) +
+  xlab("Stability threshold [frames]") +
+  ylab("Overall F1 score") +
+  theme_few()
+```
+
+```{r}
+ggplot(dt,
+       aes(x = MOTA,
+           y = MOTP)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey50") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_beeswarm(aes(color = as.factor(stability_threshold)),
+                cex = 0.1) +
+  scale_color_manual("Stability\nthreshold", values = cbPalette) +
+  theme_few()
+```
+

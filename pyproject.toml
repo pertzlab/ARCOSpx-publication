@@ -1,0 +1,38 @@
+[project]
+name = "arcospx-notebooks"
+version = "0.1.0"
+requires-python = ">=3.10, <3.12"
+
+dependencies = [
+  "pyqt5-qt5<=5.15.2; sys_platform == 'win32'",
+  "pyqt5-qt5>=5.15.11; sys_platform != 'win32'",
+  "PyQt5",
+  "jupyterlab",
+  "basicpy",
+  "numpy",
+  "pandas",
+  "scipy",
+  "matplotlib",
+  "seaborn",
+  "scikit-image",
+  "scikit-learn",
+  "tifffile",
+  "tqdm",
+  "matplotlib-scalebar",
+  "arcos4py",
+  "napari[all]",
+  "napari-timestamper",
+  "natsort",
+  "numba",
+  "motmetrics",
+  "plotnine",
+  "opencv-python",
+  "pyimagej",
+  "scyjava",
+  "napari-convpaint",
+  "catboost",
+  "statsmodels",
+  "pystackreg",
+  "cellpose",
+  "hyperactive<5.0.0"
+]

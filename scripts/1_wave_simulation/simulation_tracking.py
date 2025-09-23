@@ -1,4 +1,4 @@
-""" This script contains the code to run different simulations for emergend dynamics and tracking with ARCOS.px."""
+"""This script contains the code to run different simulations for emergend dynamics and tracking with ARCOS.px."""
 
 import numpy as np
 from arcos4py.tools import track_events_image
@@ -11,12 +11,18 @@ from sklearn.neighbors import NearestNeighbors
 from kneed import KneeLocator
 import matplotlib.pyplot as plt
 import argparse
+from trackmate_bridge import run_trackmate_from_cc, remap_segmentation
+from skimage.measure import label
+from sklearn.cluster import DBSCAN
+
 
 # Import simulation functions, individual parameters are set in the cellular_automaton.py file
 from cellular_automaton import sim_circles, sim_target_pattern, sim_directional, sim_chaotic
 
 # Global variables
-OUT_DIR = "evaluation_arcospx_run001/"  # Base directory for the dataset
+OUT_DIR = "evaluation_arcospx_run006/"  # Base directory for the dataset
+LOG_DIR = os.path.join(OUT_DIR, "logs")
+
 GRID_SIZE = (512, 512)
 NUM_STEPS = 500
 
@@ -66,15 +72,17 @@ def create_required_folders(base_dir, sequence_id):
     - base_dir: Base directory for the dataset
     - sequence_id: Identifier for the sequence (e.g., "01")
     """
-    res_folder = os.path.join(base_dir, f"{sequence_id}_RES")
+    res_folder = os.path.join(base_dir, f"{sequence_id}_RES_arcospx")
+    res_folder_cc = os.path.join(base_dir, f"{sequence_id}_RES_trackmate")
     gt_seg_folder = os.path.join(base_dir, f"{sequence_id}_GT", "SEG")
     gt_tra_folder = os.path.join(base_dir, f"{sequence_id}_GT", "TRA")
     gt_raw_folder = os.path.join(base_dir, f"{sequence_id}_GT", "RAW")
     os.makedirs(res_folder, exist_ok=True)
+    os.makedirs(res_folder_cc, exist_ok=True)
     os.makedirs(gt_seg_folder, exist_ok=True)
     os.makedirs(gt_tra_folder, exist_ok=True)
     os.makedirs(gt_raw_folder, exist_ok=True)
-    return res_folder, gt_seg_folder, gt_tra_folder, gt_raw_folder
+    return res_folder, res_folder_cc, gt_seg_folder, gt_tra_folder, gt_raw_folder
 
 
 def save_mask_tif_files(data, output_dir, prefix="mask"):
@@ -91,7 +99,7 @@ def save_mask_tif_files(data, output_dir, prefix="mask"):
         mask = data[t]
         t_str = f"{t:03d}"  # Format temporal index with three digits
         file_path = os.path.join(output_dir, f"{prefix}{t_str}.tif")
-        tifffile.imwrite(file_path, mask.astype(np.uint16), compression="zlib")
+        tifffile.imwrite(file_path, mask.astype(np.int32), compression="zlib")
     logger.info(f"Saved {time_points} maskT.tif files to {output_dir}")
 
 
@@ -253,6 +261,24 @@ def estimate_eps(
 
     return eps
 
+def dbscan_labeling(frame, eps, min_samples):
+    # get coordinates of all foreground voxels
+    coords = np.column_stack(np.nonzero(frame))
+    if len(coords) == 0:
+        return np.zeros_like(frame, dtype=int)
+
+    # cluster in coordinate space
+    db = DBSCAN(eps=eps, min_samples=min_samples).fit(coords)
+    labels = db.labels_
+    # build an output volume, background=0, clusters 1,2,...
+    out = np.zeros(frame.shape, dtype=int)
+    for lbl in np.unique(labels):
+        if lbl == -1:
+            continue
+        mask = labels == lbl
+        out[tuple(coords[mask].T)] = lbl + 1
+    return out
+
 
 def _nearest_neighbour_eps(data: np.ndarray, n_neighbors: int):
     """Helper function to compute nearest neighbor distances."""
@@ -285,7 +311,7 @@ def add_noise(image, snr):
     return noisy_image.astype(np.uint16)
 
 
-def run_simulation_and_tracking(sim_function_index, signal_to_noise_ratio=np.inf):
+def run_simulation_and_tracking(sim_function_index, signal_to_noise_ratio=np.inf, iteration=0):
     sim_function = SIMULATION_FUNCTIONS_TO_RUN[sim_function_index]
     sim_type = sim_function.__name__
     dir_out = f"{sim_type}_snr_{signal_to_noise_ratio}"
@@ -300,91 +326,119 @@ def run_simulation_and_tracking(sim_function_index, signal_to_noise_ratio=np.inf
     n_prev = sim_params["n_prev"]
 
     # Loop to repeat each simulation
-    for iteration in range(10):
-        seed = iteration
-        np.random.seed(seed)
+    seed = iteration
+    np.random.seed(seed)
 
-        logger.info(
-            "Iteration %d: Running simulation for %s, snr %s, cluster_size %d, eps %s, n_prev %d, seed %d",
-            iteration,
-            dir_out,
-            str(signal_to_noise_ratio),
-            cluster_size,
-            str(eps),
-            n_prev,
-            seed,
+    logger.info(
+        "Iteration %d: Running simulation for %s, snr %s, cluster_size %d, eps %s, n_prev %d, seed %d",
+        iteration,
+        dir_out,
+        str(signal_to_noise_ratio),
+        cluster_size,
+        str(eps),
+        n_prev,
+        seed,
+    )
+
+    # Run the simulation with the seed
+    history, wave_id_history = sim_function(seed, GRID_SIZE, NUM_STEPS)
+
+    # Add noise to the data
+    history = np.stack(history)
+    wave_id_history = np.stack(wave_id_history)
+    if signal_to_noise_ratio < np.inf:
+        history = add_noise(history, signal_to_noise_ratio)
+
+    thresh = np.mean(history[0]) * 1.5 if signal_to_noise_ratio < np.inf else 0
+
+    # If eps is set to 'auto', estimate it
+    if eps == "auto":
+        eps = estimate_eps(
+            image=history > thresh,
+            method="kneepoint",
+            max_samples=100_000,
+            plot=False,
+            n_neighbors=cluster_size + 1,
         )
+        eps = max(eps, 1.5)  # Ensure EPS is at least 1.5
 
-        # Run the simulation with the seed
-        history_circular, wave_id_history_circular = sim_function(seed, GRID_SIZE, NUM_STEPS)
+    logger.info(f"Iteration {iteration}: Estimated eps: {eps}")
 
-        # Add noise to the data
-        history_circular = np.stack(history_circular)
-        wave_id_history_circular = np.stack(wave_id_history_circular)
-        if signal_to_noise_ratio < np.inf:
-            history_circular = add_noise(history_circular, signal_to_noise_ratio)
+    binary_stack = history > thresh
 
-        thresh = np.mean(history_circular[0]) * 1.5 if signal_to_noise_ratio < np.inf else 0
+    logger.info(f"Iteration {iteration}: Tracking events with arcospx")
 
-        # If eps is set to 'auto', estimate it
-        if eps == "auto":
-            eps = estimate_eps(
-                image=history_circular > thresh,
-                method="kneepoint",
-                max_samples=100_000,
-                plot=False,
-                n_neighbors=cluster_size + 1,
-            )
-            eps = max(eps, 1.5)  # Ensure EPS is at least 5
+    # Track events
+    tracked_arcos4py = track_events_image(
+        binary_stack,
+        clustering_method="dbscan",
+        min_clustersize=cluster_size,
+        eps=eps,
+        downsample=1,
+        n_prev=n_prev,
+        show_progress=False,
+    )
 
-        logger.info(f"Iteration {iteration}: Estimated eps: {eps}")
+    # ---- CC detector  +  TrackMate linker ----------------------------
+    # cc_labels = np.stack([label(f, connectivity=1) for f in binary_stack])
+    _labels = np.stack([
+        dbscan_labeling(f, eps=eps, min_samples=cluster_size) for f in binary_stack
+    ])  # Use DBSCAN for labeling
 
-        # Track events
-        events_tracked = track_events_image(
-            history_circular > thresh,
-            clustering_method="dbscan",
-            min_clustersize=cluster_size,
-            eps=eps,
-            downsample=1,
-            n_prev=n_prev,
-            show_progress=False,
-        )
+    logger.info(f"Iteration {iteration}: tracking events with TrackMate")
+    tm_cc_df = run_trackmate_from_cc(
+        _labels,
+        link_max_dist=10,
+        gap_closing_max_dist=10,
+        gap_closing_max_frame_gap=2,
+    )
 
-        # Make sure to start only from a frame with detected events
-        for idx, f in enumerate(wave_id_history_circular):
-            if np.max(f) > 0:
-                break
+    # tracked_trackmate = rasterise_cc_regions(cc_labels, tm_cc_df)
 
-        sequence_id = f"{iteration:02d}"  # Sequence identifier with leading zeros
+    # Make sure to start only from a frame with detected events
+    for idx, f in enumerate(wave_id_history):
+        if np.max(f) > 0:
+            break
 
-        tracked_labels = events_tracked[idx:]
-        gt_tracking = wave_id_history_circular[idx:]
-        gt_segmentation = wave_id_history_circular[idx:]
-        history_circular = history_circular[idx:]
+    tracked_trackmate = remap_segmentation(tm_cc_df, _labels, "t", "label", "track_id")
 
-        # Create the required folder structure
-        res_folder, gt_seg_folder, gt_tra_folder, gt_raw_folder = create_required_folders(base_dir, sequence_id)
-        res_track_file = os.path.join(res_folder, "res_track.txt")
-        gt_track_file = os.path.join(gt_tra_folder, "man_track.txt")
+    sequence_id = f"{iteration:02d}"  # Sequence identifier with leading zeros
 
-        # Save the results (RES) - output from your algorithm
-        save_mask_tif_files(tracked_labels, res_folder, prefix="mask")
-        generate_tracking_txt(tracked_labels, res_track_file)
+    tracked_arcos4py = tracked_arcos4py[idx:]
+    tracked_trackmate = tracked_trackmate
+    gt_tracking = wave_id_history[idx:]
+    gt_segmentation = wave_id_history[idx:]
+    history = history[idx:]
 
-        # Save the ground truth (GT)
-        save_mask_tif_files(gt_segmentation, gt_seg_folder, prefix="man_seg")
-        save_mask_tif_files(gt_tracking, gt_tra_folder, prefix="man_track")
-        save_mask_tif_files(history_circular, gt_raw_folder, prefix="raw")
-        generate_tracking_txt(gt_tracking, gt_track_file)
+    # Create the required folder structure
+    res_folder_arcospx, res_folder_trackmate, gt_seg_folder, gt_tra_folder, gt_raw_folder = create_required_folders(
+        base_dir, sequence_id
+    )
 
-        logger.info(f"Iteration {iteration}: Finished simulation and tracking")
+    res_track_file = os.path.join(res_folder_arcospx, "res_track.txt")
+    res_tracks_file_cc = os.path.join(res_folder_trackmate, "res_track.txt")
+    gt_track_file = os.path.join(gt_tra_folder, "man_track.txt")
 
-    logger.info("Finished all iterations for %s", dir_out)
+    # Save the results (RES) - output from your algorithm
+    save_mask_tif_files(tracked_arcos4py, res_folder_arcospx, prefix="mask")
+    save_mask_tif_files(tracked_trackmate, res_folder_trackmate, prefix="mask")
+    generate_tracking_txt(tracked_arcos4py, res_track_file)
+
+    # Save the ground truth (GT)
+    save_mask_tif_files(gt_segmentation, gt_seg_folder, prefix="man_seg")
+    save_mask_tif_files(gt_tracking, gt_tra_folder, prefix="man_track")
+    save_mask_tif_files(history, gt_raw_folder, prefix="raw")
+
+    generate_tracking_txt(gt_tracking, gt_track_file)
+    generate_tracking_txt(tracked_trackmate, res_tracks_file_cc)
+
+    logger.info(f"Iteration {iteration}: Finished simulation and tracking")
 
 
 if __name__ == "__main__":
     # Create output directory
     os.makedirs(OUT_DIR, exist_ok=True)
+    os.makedirs(LOG_DIR, exist_ok=True)
 
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Run simulation and tracking with dynamic parameters.")
@@ -392,6 +446,7 @@ if __name__ == "__main__":
         "--sim_function_index", type=int, required=False, help="Index of the simulation function.", default=0
     )
     parser.add_argument("--snr", required=False, help='Signal-to-noise ratio. Use "inf" for infinity.', default="inf")
+    parser.add_argument("--iteration", type=int, required=False, help="Iteration number for the simulation.", default=0)
     args = parser.parse_args()
 
     sim_function_index = args.sim_function_index
@@ -405,15 +460,17 @@ if __name__ == "__main__":
     sim_type = SIMULATION_FUNCTIONS_TO_RUN[sim_function_index].__name__
 
     logging.basicConfig(
-        filename=os.path.join(OUT_DIR, f"simulation_run_{sim_type}_snr_{signal_to_noise_ratio}.log"),
+        filename=os.path.join(LOG_DIR, f"simulation_run_{sim_type}_snr_{signal_to_noise_ratio}.log"),
         level=logging.INFO,
         format="%(asctime)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger("SimulationTracking")
+    logger.info("Starting simulation and tracking for %s with SNR %s, iteration %s", sim_type, str(signal_to_noise_ratio), str(args.iteration))
 
     try:
         # Run simulation and tracking
-        run_simulation_and_tracking(sim_function_index, signal_to_noise_ratio)
+        run_simulation_and_tracking(sim_function_index, signal_to_noise_ratio, iteration=args.iteration)
     except Exception as e:
         logger.error("An error occurred during the main execution: %s", str(e))
         logger.exception("Exception traceback:")

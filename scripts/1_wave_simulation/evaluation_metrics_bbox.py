@@ -1,6 +1,7 @@
 """Compute MOT metrics for the bounding box tracking results of the wave simulation."""
 
 import os
+import sys
 import numpy as np
 import logging
 import motmetrics as mm
@@ -16,13 +17,12 @@ import argparse
 
 
 # variable definitions
-OUT_DIR = "evaluation_arcospx_run001/"  # Base directory for the dataset
-NUM_STEPS = 500  # Number of frames in the simulation
+OUT_DIR = "evaluation_arcospx_run006/"  # Base directory for the dataset
 
 SIMULATION_FUNCTION_NAMES_TO_EVAL = ["sim_circles", "sim_target_pattern", "sim_directional", "sim_chaotic"]
 PATTERN = re.compile(r".*(\d{3}).tif")  # Pattern to extract the frame number from the filename
 
-IOU_THRESHOLD = 0.5  # Intersection over Union threshold for matching bounding boxes
+IOU_THRESHOLD = 0.75  # Intersection over Union threshold for matching bounding boxes
 SIZE_THRESHOLD = 1  # Minimum size of a bounding box to be considered a event
 
 
@@ -88,19 +88,19 @@ def load_tif_sequence(directory):
     return sequence
 
 
-def find_gt_res_pairs(base_dir):
+def find_gt_res_pairs(base_dir: str, tracker_name: str = ""):
     """Find pairs of *_GT and *_RES folders that share the same prefix."""
     gt_res_pairs = []
 
     directories = os.listdir(base_dir)
 
-    gt_dirs = [d for d in directories if d.endswith("_GT")]
-    res_dirs = [d for d in directories if d.endswith("_RES")]
+    gt_dirs = [d for d in directories if d.endswith("GT")]
+    res_dirs = [d for d in directories if d.endswith(f"_RES_{tracker_name}")]
 
     # Match GT and RES pairs by the same prefix (e.g., '00_GT' and '00_RES')
     for gt_dir in gt_dirs:
         prefix = gt_dir[:-3]
-        corresponding_res_dir = f"{prefix}_RES"
+        corresponding_res_dir = f"{prefix}_RES_{tracker_name}"
 
         if corresponding_res_dir in res_dirs:
             gt_res_pairs.append((os.path.join(base_dir, gt_dir), os.path.join(base_dir, corresponding_res_dir)))
@@ -108,74 +108,87 @@ def find_gt_res_pairs(base_dir):
     return gt_res_pairs
 
 
-def run_evaluation_and_compute_metrics(sim_function_index, signal_to_noise_ratio=np.inf):
+def run_evaluation_and_compute_metrics(sim_function_index, signal_to_noise_ratio=np.inf, tracker_name="arcospx", iteration=0):
+
     sim_function = SIMULATION_FUNCTION_NAMES_TO_EVAL[sim_function_index]
     dir_out = f"{str(sim_function)}_snr_{signal_to_noise_ratio}"
     base_dir = os.path.join(OUT_DIR, dir_out)
 
+    # Ensure base directory exists
+    os.makedirs(base_dir, exist_ok=True)
+
     logger.info("Computing metrics for %s", dir_out)
-
-    # Find valid *_GT and *_RES folder pairs
-    gt_res_pairs = find_gt_res_pairs(base_dir)
-
-    if not gt_res_pairs:
-        logger.error("No valid GT/RES folder pairs found in the output directory!")
-        return
 
     all_summaries = []
 
-    for _, (gt_folder, res_folder) in enumerate(gt_res_pairs):
-        prefix = os.path.basename(gt_folder)[:-3]  # Get the common prefix (e.g., '00')
+    # Find valid *_GT and *_RES folder pairs
+    gt_res_pairs = find_gt_res_pairs(base_dir, tracker_name)
 
-        logger.info(f"Processing folder pair {prefix}_GT and {prefix}_RES of {dir_out}")
+    if not gt_res_pairs:
+        logger.error("No valid GT/RES folder pairs found in the output directory!")
+        logger.info(gt_res_pairs)
+        return
+    
+    prefix = str(iteration).zfill(2)  # Ensure prefix is zero-padded to 3 digits
+    gt_folder = os.path.join(base_dir, f"{prefix}_GT")
+    res_folder = os.path.join(base_dir, f"{prefix}_RES_{tracker_name}")
+    prefix = os.path.basename(gt_folder)[:-3]  # Get the common prefix (e.g., '00')
 
-        gt_tra_folder = os.path.join(gt_folder, "TRA")
-        acc = mm.MOTAccumulator(auto_id=False)
+    logger.info(f"Processing folder pair {gt_folder} and {res_folder} of {dir_out}")
 
-        # Load tracked labels and ground truth tracking data from .tif files
-        tracked_labels = load_tif_sequence(res_folder)
-        gt_tracking = load_tif_sequence(gt_tra_folder)
-        logger.info(f"Loaded {len(tracked_labels)} tracked labels and {len(gt_tracking)} ground truth tracking data")
+    gt_tra_folder = os.path.join(gt_folder, "TRA")
+    acc = mm.MOTAccumulator(auto_id=False)
 
-        # Accumulate metrics for every frame
-        for frame_num, (gt_image, pred_image) in enumerate(zip(gt_tracking, tracked_labels)):
-            logger.debug(f"Processing frame {frame_num} of folder pair {prefix}")
-            gt_detections, pred_detections, gt_labels, pred_labels = process_frame(
-                gt_image, pred_image, frame_num, SIZE_THRESHOLD
-            )
+    # Load tracked labels and ground truth tracking data from .tif files
+    tracked_labels = load_tif_sequence(res_folder)
+    gt_tracking = load_tif_sequence(gt_tra_folder)
+    logger.info(f"Loaded {len(tracked_labels)} tracked labels and {len(gt_tracking)} ground truth tracking data")
 
-            distances = mm.distances.iou_matrix(gt_detections, pred_detections, max_iou=IOU_THRESHOLD)
-
-            acc.update(gt_labels, pred_labels, distances, frameid=frame_num)
-
-        # Compute metrics
-        mh = mm.metrics.create()
-        summary = mh.compute(
-            acc,
-            metrics=[
-                "num_frames",
-                "mota",
-                "motp",
-                "num_switches",
-                "num_false_positives",
-                "num_misses",
-                "num_detections",
-                "num_objects",
-                "num_predictions",
-                "precision",
-                "recall",
-            ],
-            name=prefix,
+    # Accumulate metrics for every frame
+    for frame_num, (gt_image, pred_image) in enumerate(zip(gt_tracking, tracked_labels)):
+        logger.debug(f"Processing frame {frame_num} of folder pair {prefix}")
+        gt_detections, pred_detections, gt_labels, pred_labels = process_frame(
+            gt_image, pred_image, frame_num, SIZE_THRESHOLD
         )
-        all_summaries.append(summary)
+
+        distances = mm.distances.iou_matrix(gt_detections, pred_detections, max_iou=IOU_THRESHOLD)
+
+        acc.update(gt_labels, pred_labels, distances, frameid=frame_num)
+
+    # Compute metrics
+    mh = mm.metrics.create()
+    summary = mh.compute(
+        acc,
+        metrics=[
+            "num_frames",
+            "mota",
+            "motp",
+            "num_switches",
+            "num_false_positives",
+            "num_misses",
+            "num_detections",
+            "num_objects",
+            "num_predictions",
+            "precision",
+            "recall",
+        ],
+        name=prefix,
+    )
+    summary['tracker_name'] = tracker_name
+    summary['sim_function'] = sim_function
+    summary['snr'] = signal_to_noise_ratio
+    summary['size_threshold'] = SIZE_THRESHOLD
+    summary['iou_threshold'] = IOU_THRESHOLD
+    summary['iteration'] = iteration
 
     # Combine all summaries
-    final_summary = pd.concat(all_summaries)
 
     # Compute and save metrics summary
-    final_summary.to_csv(f"{base_dir}/summary_bbox_05iou.csv", index=True)
+    csv_path = os.path.join(base_dir, f"summary_bbox_{IOU_THRESHOLD}_{prefix}_{tracker_name}.csv")
+    summary.to_csv(csv_path, index=False)
+    logger.info(f"Saved metrics summary to: {csv_path}")
 
-    logger.info(f"Finished computing metrics for {dir_out}")
+    logger.info(f"Finished computing metrics for {prefix}_{dir_out}")
 
 
 if __name__ == "__main__":
@@ -185,21 +198,39 @@ if __name__ == "__main__":
         "--sim_function_index", type=int, required=False, help="Index of the simulation function.", default=0
     )
     parser.add_argument("--snr", type=str, help='Signal-to-noise ratio. Use "inf" for infinity.', default="inf")
+    parser.add_argument(
+        "--tracker", type=str, help="Name of the tracker to evaluate.", default="arcospx"
+    )
+    parser.add_argument(
+        "--iteration", type=int, help="Iteration number for the evaluation.", default=0
+    )
 
     args = parser.parse_args()
 
     sim_function_index = args.sim_function_index
     snr = args.snr
+    tracker_name = args.tracker
+    iteration = args.iteration
+
+    # Convert SNR string to appropriate type
+    if snr == "inf":
+        snr_value = np.inf
+    else:
+        snr_value = float(snr)
 
     current_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     logfilename = os.path.join(OUT_DIR, f"evaluation_metrics_{current_date}_snr_{snr}.log")
 
     # Set up logging
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
     logger = logging.getLogger(__name__)
 
     try:
-        run_evaluation_and_compute_metrics(sim_function_index, snr)
+        run_evaluation_and_compute_metrics(sim_function_index, snr_value, tracker_name, iteration)
     except Exception as e:
         logger.error("An error occurred during the main execution: %s", str(e))
         logger.exception("Exception traceback:")

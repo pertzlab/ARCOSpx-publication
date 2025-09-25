@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/898619236.svg)](https://zenodo.org/badge/latestdoi/898619236)
+
 # Introduction
 
 This repository contains scripts required to reproduce the results in the publication of Grädel et al. _Tracking Coordinated Cellular Dynamics in Time-Lapse Microscopy with ARCOS.px_ ([link](https://doi.org/10.1101/2025.03.14.643386)).
